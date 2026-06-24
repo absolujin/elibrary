@@ -1,6 +1,13 @@
 import { Body, Controller, Get, Headers, Param, Post, Res, UnauthorizedException } from "@nestjs/common";
-import { genericAuthErrorMessage, sessionCookiePolicy } from "@elibrary/domain";
-import { AuthService, type OAuthCallbackInput } from "./auth.service";
+import {
+  allowResponseProperties,
+  genericAuthErrorMessage,
+  sessionCookiePolicy,
+  validateStrictObject,
+  type ApiInputSchema,
+  type ResponseAllowlist
+} from "@elibrary/domain";
+import { AuthService } from "./auth.service";
 
 interface CookieResponse {
   cookie(name: string, value: string, options: Record<string, unknown>): void;
@@ -13,18 +20,24 @@ export class AuthController {
 
   @Post("signup")
   async signUp(
-    @Body() body: { readonly email?: string; readonly password?: string; readonly displayName?: string } = {},
+    @Body() body: unknown = {},
     @Headers("x-forwarded-for") forwardedFor: string | undefined,
     @Headers("user-agent") userAgent: string | undefined,
     @Res({ passthrough: true }) response: CookieResponse
   ): Promise<Record<string, unknown>> {
+    const validatedBody = validateStrictObject(body, signUpBodySchema);
+
     try {
       const result = await this.authService.signUpWithEmail(
-        { email: String(body.email ?? ""), password: String(body.password ?? ""), displayName: body.displayName },
+        {
+          email: getRequiredString(validatedBody, "email"),
+          password: getRequiredString(validatedBody, "password"),
+          displayName: getOptionalString(validatedBody, "displayName")
+        },
         { ipAddress: forwardedFor, userAgent }
       );
       writeSessionCookie(response, result.sessionId);
-      return { session: result.session };
+      return allowAuthSessionResponse({ session: result.session });
     } catch {
       throwGenericAuthFailure();
     }
@@ -32,18 +45,23 @@ export class AuthController {
 
   @Post("signin")
   async signIn(
-    @Body() body: { readonly email?: string; readonly password?: string } = {},
+    @Body() body: unknown = {},
     @Headers("x-forwarded-for") forwardedFor: string | undefined,
     @Headers("user-agent") userAgent: string | undefined,
     @Res({ passthrough: true }) response: CookieResponse
   ): Promise<Record<string, unknown>> {
+    const validatedBody = validateStrictObject(body, signInBodySchema);
+
     try {
       const result = await this.authService.signInWithEmail(
-        { email: String(body.email ?? ""), password: String(body.password ?? "") },
+        {
+          email: getRequiredString(validatedBody, "email"),
+          password: getRequiredString(validatedBody, "password")
+        },
         { ipAddress: forwardedFor, userAgent }
       );
       writeSessionCookie(response, result.sessionId);
-      return { session: result.session };
+      return allowAuthSessionResponse({ session: result.session });
     } catch {
       throwGenericAuthFailure();
     }
@@ -52,24 +70,26 @@ export class AuthController {
   @Post("oauth/:provider/callback")
   async oauthCallback(
     @Param("provider") provider: string,
-    @Body() body: Partial<OAuthCallbackInput> = {},
+    @Body() body: unknown = {},
     @Headers("x-forwarded-for") forwardedFor: string | undefined,
     @Headers("user-agent") userAgent: string | undefined,
     @Res({ passthrough: true }) response: CookieResponse
   ): Promise<Record<string, unknown>> {
+    const validatedBody = validateStrictObject(body, oauthCallbackBodySchema);
+
     try {
       const result = await this.authService.signInWithOAuthCallback(
         provider,
         {
-          code: String(body.code ?? ""),
-          state: String(body.state ?? ""),
-          redirectUri: String(body.redirectUri ?? ""),
-          nonce: body.nonce
+          code: getRequiredString(validatedBody, "code"),
+          state: getRequiredString(validatedBody, "state"),
+          redirectUri: getRequiredString(validatedBody, "redirectUri"),
+          nonce: getOptionalString(validatedBody, "nonce")
         },
         { ipAddress: forwardedFor, userAgent }
       );
       writeSessionCookie(response, result.sessionId);
-      return { session: result.session };
+      return allowAuthSessionResponse({ session: result.session });
     } catch {
       throwGenericAuthFailure();
     }
@@ -92,22 +112,24 @@ export class AuthController {
 
   @Get("session")
   getSession(@Headers("cookie") cookieHeader: string | undefined): Record<string, unknown> {
-    return { session: this.authService.getPublicSession(readSessionCookie(cookieHeader)) };
+    return allowAuthSessionResponse({ session: this.authService.getPublicSession(readSessionCookie(cookieHeader)) });
   }
 
   @Post("admin/mfa/verify")
   async verifyAdminMfa(
-    @Body() body: { readonly totpCode?: string; readonly recoveryCode?: string } = {},
+    @Body() body: unknown = {},
     @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) response: CookieResponse
   ): Promise<Record<string, unknown>> {
+    const validatedBody = validateStrictObject(body, adminMfaBodySchema);
+
     try {
       const result = await this.authService.verifyAdminMfa(readSessionCookie(cookieHeader), {
-        totpCode: body.totpCode,
-        recoveryCode: body.recoveryCode
+        totpCode: getOptionalString(validatedBody, "totpCode"),
+        recoveryCode: getOptionalString(validatedBody, "recoveryCode")
       });
       writeSessionCookie(response, result.sessionId);
-      return { session: result.session };
+      return allowAuthSessionResponse({ session: result.session });
     } catch {
       throwGenericAuthFailure();
     }
@@ -122,6 +144,41 @@ export class AuthController {
     }
   }
 }
+
+const signUpBodySchema = {
+  email: { type: "string", minLength: 3, maxLength: 320 },
+  password: { type: "string", minLength: 1, maxLength: 256, trim: false },
+  displayName: { type: "string", optional: true, minLength: 1, maxLength: 120 }
+} as const satisfies ApiInputSchema;
+
+const signInBodySchema = {
+  email: { type: "string", minLength: 3, maxLength: 320 },
+  password: { type: "string", minLength: 1, maxLength: 256, trim: false }
+} as const satisfies ApiInputSchema;
+
+const oauthCallbackBodySchema = {
+  code: { type: "string", minLength: 1, maxLength: 2048, trim: false },
+  state: { type: "string", minLength: 1, maxLength: 512, trim: false },
+  redirectUri: { type: "url", maxLength: 2048 },
+  nonce: { type: "string", optional: true, minLength: 1, maxLength: 512, trim: false }
+} as const satisfies ApiInputSchema;
+
+const adminMfaBodySchema = {
+  totpCode: { type: "string", optional: true, minLength: 6, maxLength: 6, pattern: /^\d{6}$/ },
+  recoveryCode: { type: "string", optional: true, minLength: 17, maxLength: 17, pattern: /^[0-9a-f]{8}-[0-9a-f]{8}$/ }
+} as const satisfies ApiInputSchema;
+
+const authSessionResponseAllowlist = {
+  session: {
+    actor: {
+      role: true,
+      userId: true
+    },
+    authenticated: true,
+    mfaRequired: true,
+    expiresAt: true
+  }
+} as const satisfies ResponseAllowlist;
 
 function writeSessionCookie(response: CookieResponse, sessionId: string): void {
   response.cookie(sessionCookiePolicy.name, sessionId, {
@@ -151,4 +208,32 @@ function readSessionCookie(cookieHeader: string | undefined): string | undefined
 
 function throwGenericAuthFailure(): never {
   throw new UnauthorizedException(genericAuthErrorMessage);
+}
+
+function allowAuthSessionResponse(value: Record<string, unknown>): Record<string, unknown> {
+  return allowResponseProperties(value, authSessionResponseAllowlist) as Record<string, unknown>;
+}
+
+function getRequiredString(input: Record<string, unknown>, field: string): string {
+  const value = input[field];
+
+  if (typeof value !== "string") {
+    throwGenericAuthFailure();
+  }
+
+  return value;
+}
+
+function getOptionalString(input: Record<string, unknown>, field: string): string | undefined {
+  const value = input[field];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throwGenericAuthFailure();
+  }
+
+  return value;
 }
