@@ -2,6 +2,8 @@ import { Module, type Provider } from "@nestjs/common";
 import { getModuleBoundary, type ModuleName } from "@elibrary/domain";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
+import { LibraryController } from "./library/library.controller";
+import { LibraryService } from "./library/library.service";
 
 function boundaryProvider(name: ModuleName): Provider {
   return {
@@ -16,7 +18,7 @@ export class AuthModule {}
 @Module({ providers: [boundaryProvider("User")] })
 export class UserModule {}
 
-@Module({ providers: [boundaryProvider("Library")] })
+@Module({ controllers: [LibraryController], providers: [boundaryProvider("Library"), LibraryService] })
 export class LibraryModule {}
 
 @Module({ providers: [boundaryProvider("Ebook")] })
