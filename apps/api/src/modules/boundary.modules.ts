@@ -1,5 +1,7 @@
 import { Module, type Provider } from "@nestjs/common";
 import { getModuleBoundary, type ModuleName } from "@elibrary/domain";
+import { AuthController } from "./auth/auth.controller";
+import { AuthService } from "./auth/auth.service";
 
 function boundaryProvider(name: ModuleName): Provider {
   return {
@@ -8,7 +10,7 @@ function boundaryProvider(name: ModuleName): Provider {
   };
 }
 
-@Module({ providers: [boundaryProvider("Auth")] })
+@Module({ controllers: [AuthController], providers: [boundaryProvider("Auth"), AuthService] })
 export class AuthModule {}
 
 @Module({ providers: [boundaryProvider("User")] })
