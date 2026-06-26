@@ -1,6 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { workerQueueNames } from "@elibrary/domain";
+import { MetadataSyncProcessor } from "./metadata-sync.processor";
 
 const redisPort = Number(process.env.REDIS_PORT ?? 6379);
 
@@ -13,6 +14,7 @@ const redisPort = Number(process.env.REDIS_PORT ?? 6379);
       }
     }),
     BullModule.registerQueue(...workerQueueNames.map((name) => ({ name })))
-  ]
+  ],
+  providers: [MetadataSyncProcessor]
 })
 export class WorkerModule {}

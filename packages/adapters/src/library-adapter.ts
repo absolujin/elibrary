@@ -2,13 +2,18 @@ export interface LibraryAdapterBookSummary {
   readonly externalId: string;
   readonly title: string;
   readonly author?: string;
+  readonly authors?: readonly string[];
   readonly isbn?: string;
+  readonly isbns?: readonly string[];
+  readonly coverImageUrl?: string;
+  readonly subjects?: readonly string[];
 }
 
 export interface LibraryAdapterBookDetail extends LibraryAdapterBookSummary {
   readonly publisher?: string;
   readonly publicationDate?: string;
   readonly description?: string;
+  readonly category?: string;
   readonly language?: string;
 }
 
